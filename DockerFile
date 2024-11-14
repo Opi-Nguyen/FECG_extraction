@@ -1,0 +1,78 @@
+FROM nvidia/cuda:11.8.0-cudnn8-devel-ubuntu20.04
+ENV PATH="/root/miniconda3/bin:${PATH}"
+ARG PATH="/root/miniconda3/bin:${PATH}"
+
+RUN apt-get update
+# | INSTALL DEPENDENCIES
+
+
+
+# | CREATE A GROUP AND USER
+RUN mkdir -p /home/staging/
+RUN groupadd -g 1005  staging
+RUN useradd -u 1005  -g staging staging
+
+# | CREATE WORKING SPACE
+RUN mkdir /customer-monitoring
+WORKDIR /customer-monitoring
+
+RUN chown -R staging:staging /customer-monitoring/
+RUN chown -R staging:staging /home/staging/
+RUN mkdir -p /var/www/html/stream/hls/
+RUN chown -R staging:staging /var/www/html/stream/hls/
+
+# | INSTALL CONDA ENV
+ENV CONDA_DIR /opt/conda
+
+RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /home/staging/miniconda.sh
+RUN /bin/bash /home/staging/miniconda.sh -b -p $CONDA_DIR \
+    && chown -R staging $CONDA_DIR \
+    && echo ". $CONDA_DIR/etc/profile.d/conda.sh" >> /home/staging/.bashrc \
+    && echo "conda init bash" >> /home/staging/.bashrc
+
+# | CREATE CONDA VIRTUAL ENV 
+RUN chown -R staging:staging /home/staging/.bashrc
+USER staging
+RUN . /home/staging/.bashrc 
+
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
+ENV PATH=$CONDA_DIR/bin:$PATH
+ENV LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libffi.so.7
+RUN conda --version
+
+ENV PATH=/home/staging/.local/bin:$PATH
+
+# *** Notice: Because of compatibility with gstreamer framework, The customer-monitoring system should better be based on python3.9
+RUN conda create -n monitoring python=3.9 -y 
+
+# Make RUN commands use the new environment:
+RUN echo "conda activate monitoring" >> ~/.bashrc
+SHELL ["/bin/bash", "--login", "-c"]
+
+
+
+# | INSTALL REQUIREMENTS OF PYTHON ENV
+RUN conda run --no-capture-output -n monitoring pip install --upgrade pip setuptools wheel
+
+RUN conda run --no-capture-output -n monitoring pip install mmcv==2.0.0
+# Build opencv with gstreamer and ffmpeg
+COPY requirements.txt ./
+RUN conda run --no-capture-output -n monitoring pip install torch==2.1.0 torchvision==0.16.0 torchaudio==2.1.0 --index-url https://download.pytorch.org/whl/cu118
+ENV FORCE_CUDA="1"
+RUN export PATH="/usr/local/cuda-11.8/bin:$PATH"
+RUN export LD_LIBRARY_PATH="/usr/local/cuda-11.8/lib64:$LD_LIBRARY_PATH"
+ENV CUDA_HOME=/usr/local/cuda
+RUN conda run --no-capture-output -n monitoring pip install -r requirements.txt
+COPY install_opencv_with_gstreamer.sh /customer-monitoring/
+# RUN ./install_opencv_with_gstreamer.sh
+# Waiting for so long ........ (╯°益°)╯彡┻━┻
+
+RUN conda run --no-capture-output -n monitoring pip cache purge
+COPY ./configs ./configs/
+COPY ./tracker ./tracker/
+COPY ./weights ./weights/
+COPY ./streaming_server.py entrypoint.sh ./helpers.py ./
+COPY ./Modules ./Modules/
+
+CMD ["bash", "entrypoint.sh"]

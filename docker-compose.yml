@@ -1,0 +1,28 @@
+version: '3.3'
+services:
+  trainning-tensorflow:
+    image: tensorflow/tensorflow:latest-gpu-jupyter
+    container_name: training-tensorflow
+    ports:
+      - "8009:8009"
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - driver: nvidia
+            device_ids: ['0']
+            capabilities: [gpu]
+
+    volumes:
+      - "./deeplearning:/FECG-CycleGAN/deeplearning"
+      - "./test:/FECG-CycleGAN/test"
+      - "./utils:/FECG-CycleGAN/utils"
+      - "./train.py:/FECG-CycleGAN/train.py"
+
+    command:
+      - ls
+      - pwd
+      # - python train.py
+
+    restart: unless-stopped
